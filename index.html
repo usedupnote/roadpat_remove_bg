@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>배경 지우개 — 로고·도장 배경 투명화 | 특허법인 로드</title>
+<meta name="description" content="특허법인 로드가 제공하는 배경 투명화 도구. 로고·도장 이미지의 배경을 투명 PNG로 — 서버 업로드 없이 브라우저 안에서 즉시 처리됩니다.">
+<meta name="theme-color" content="#0F1726">
+<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+<link rel="apple-touch-icon" href="assets/favicon-180.png">
+<link rel="stylesheet" href="style.css?v=5">
+</head>
+<body>
+
+<nav class="topbar">
+  <div class="topbar-inner">
+    <a href="https://roadpat.com/" target="_blank" rel="noopener" title="특허법인 로드 홈페이지">
+      <img src="assets/logo-wordmark.png" alt="ROAD — 특허법인 로드" height="40">
+    </a>
+    <a class="topbar-app" href="./">배경 지우개</a>
+  </div>
+</nav>
+
+<header>
+  <h1>배경 지우개</h1>
+  <p class="tagline">로고·도장 이미지의 배경을 투명 PNG로 — 업로드 없이, 브라우저 안에서.</p>
+  <p class="privacy">🔒 이미지는 서버로 전송되지 않습니다. 모든 처리는 내 컴퓨터 안에서만 이루어집니다.</p>
+</header>
+
+<main>
+  <div id="dropzone" tabindex="0">
+    <strong>클릭해서 이미지 선택</strong>
+    <span>또는 파일을 끌어다 놓기 · 캡처 후 Ctrl+V 붙여넣기</span>
+  </div>
+  <input type="file" id="file-input" accept="image/*" hidden>
+
+  <section id="editor" hidden>
+    <div class="toolbar">
+      <div class="group">
+        <span class="group-label">제거 방식</span>
+        <div class="segmented" role="group">
+          <button class="mode-btn active" data-mode="edge" title="가장자리와 이어진 배경만 지웁니다. 로고 안쪽의 같은 색은 보존됩니다.">바깥 배경 제거</button>
+          <button class="mode-btn" data-mode="global" title="배경색과 비슷한 픽셀을 이미지 전체에서 지웁니다.">같은 색 모두 제거</button>
+          <button class="mode-btn" data-mode="stamp" title="흰 종이에 찍힌 도장·스캔본에 최적. 밝기를 투명도로 변환해 반투명한 인영까지 살립니다.">도장·스캔 모드</button>
+        </div>
+      </div>
+
+      <div class="group">
+        <span class="group-label">배경색</span>
+        <span id="bg-swatch" title="현재 배경색"></span>
+        <button id="auto-bg" class="small-btn">자동 감지</button>
+        <span class="hint">원본 이미지를 클릭하면 그 색이 배경색이 됩니다</span>
+      </div>
+
+      <div class="group sliders">
+        <label class="slider-row" data-modes="edge global">
+          <span>허용 오차</span>
+          <input type="range" id="tol" min="0" max="120" value="25">
+          <output id="tol-val">25</output>
+        </label>
+        <label class="slider-row" data-modes="edge global">
+          <span>가장자리 부드러움</span>
+          <input type="range" id="soft" min="0" max="80" value="25">
+          <output id="soft-val">25</output>
+        </label>
+        <label class="slider-row" data-modes="edge global">
+          <span>가장자리 흐림</span>
+          <input type="range" id="feather" min="0" max="4" value="0">
+          <output id="feather-val">0</output>
+        </label>
+        <label class="slider-row" data-modes="stamp">
+          <span>진하기</span>
+          <input type="range" id="strength" min="50" max="200" value="110">
+          <output id="strength-val">110</output>
+        </label>
+        <label class="slider-row" data-modes="stamp">
+          <span>잡티 제거</span>
+          <input type="range" id="despeckle" min="0" max="40" value="8">
+          <output id="despeckle-val">8</output>
+        </label>
+      </div>
+
+      <div class="group actions">
+        <button id="download" class="primary">투명 PNG 다운로드</button>
+        <label class="check-row" title="개체 주변의 불필요한 투명 여백을 잘라내 개체가 중앙에 오도록 저장합니다">
+          <input type="checkbox" id="trim" checked> 투명 여백 잘라내기
+        </label>
+      </div>
+    </div>
+
+    <div class="panes">
+      <figure>
+        <figcaption>원본 <em>— 클릭하면 그 색을 배경색으로 선택</em></figcaption>
+        <div class="pane-body"><canvas id="src-canvas"></canvas></div>
+      </figure>
+      <figure>
+        <figcaption>결과 (투명 미리보기)</figcaption>
+        <div class="pane-body checker"><canvas id="out-canvas"></canvas></div>
+      </figure>
+    </div>
+
+    <p id="status"></p>
+  </section>
+
+  <section class="guide">
+    <h2>어떤 방식을 고르면 되나요?</h2>
+    <div class="guide-grid">
+      <div class="guide-card">
+        <h3 class="c-navy">바깥 배경 제거</h3>
+        <p>대부분의 로고에 추천. 로고 안쪽의 흰 글자·구멍은 그대로 두고 바깥 배경만 지웁니다.</p>
+      </div>
+      <div class="guide-card">
+        <h3 class="c-blue">같은 색 모두 제거</h3>
+        <p>로고 안쪽까지 배경색과 같은 색을 전부 뚫고 싶을 때 사용합니다.</p>
+      </div>
+      <div class="guide-card">
+        <h3 class="c-cyan">도장·스캔 모드</h3>
+        <p>흰 종이에 찍어 스캔·촬영한 도장, 서명, 직인에 최적. 잉크의 진한 정도가 투명도로 살아납니다.</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <p class="footer-brand">ROAD <span>PATENT LAW FIRM</span></p>
+  <p>특허법인 로드 · <a href="https://roadpat.com/" target="_blank" rel="noopener">roadpat.com</a></p>
+  <p class="footer-meta">배경 지우개 · 100% 브라우저 처리(자체 엔진) · PNG/JPG/WebP 지원</p>
+</footer>
+
+<script src="app.js?v=3"></script>
+</body>
+</html>
