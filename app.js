@@ -27,6 +27,10 @@ const els = {
   download: $('#download'),
   trim: $('#trim'),
   status: $('#status'),
+  brushBtns: document.querySelectorAll('.brush-btn'),
+  brushExtras: $('#brush-extras'),
+  brushSize: $('#brush-size'), brushSizeVal: $('#brush-size-val'),
+  brushUndo: $('#brush-undo'), brushClear: $('#brush-clear'),
 };
 
 const srcCtx = els.srcCanvas.getContext('2d', { willReadFrequently: true });
@@ -43,6 +47,13 @@ const state = {
   bg: { r: 255, g: 255, b: 255 },
   srcData: null,   // 원본 ImageData (불변)
   distMap: null,   // 배경색 기준 색 거리 캐시 (bg/이미지 변경 시 무효화)
+  // 수동 보정 브러시: 엔진 결과와 분리된 편집 레이어라 재처리에도 유지됨
+  brushTool: null, // null | 'erase' | 'restore'
+  brushSize: 30,   // 지름(이미지 px)
+  strokes: [],     // 획 목록 [{tool, size, points:[[x,y],...]}] — 되돌리기용
+  editMask: null,  // Uint8Array w*h: 0=없음 1=지움 2=복원
+  engineOut: null, // 엔진 결과 ImageData (편집 미적용)
+  workingOut: null,// 화면 표시 = engineOut + editMask
 };
 
 /* ---------- 색 거리 (redmean 가중 RGB, 0~255 스케일) ---------- */
@@ -190,7 +201,10 @@ function process() {
     if (state.feather > 0) blurAlpha(out.data, w, h, state.feather);
   }
 
-  outCtx.putImageData(out, 0, 0);
+  state.engineOut = out;
+  state.workingOut = new ImageData(new Uint8ClampedArray(out.data), w, h);
+  if (state.editMask) applyEditMaskAll();
+  outCtx.putImageData(state.workingOut, 0, 0);
   const ms = Math.round(performance.now() - t0);
   setStatus(`${w}×${h}px · 처리 ${ms}ms · 배경색 rgb(${state.bg.r}, ${state.bg.g}, ${state.bg.b})`);
 }
@@ -226,8 +240,12 @@ function loadFromSrc(src, name) {
     srcCtx.drawImage(img, 0, 0);
     state.srcData = srcCtx.getImageData(0, 0, w, h);
     state.distMap = null;
+    state.editMask = new Uint8Array(w * h);
+    state.strokes = [];
     state.bg = detectBg(state.srcData.data, w, h);
     updateSwatch();
+    updateBrushUI();
+    updateBrushCursor();
     els.dropzone.classList.add('compact');
     els.editor.hidden = false;
     process();
@@ -295,6 +313,161 @@ els.srcCanvas.addEventListener('click', (e) => {
   updateSwatch();
   scheduleProcess();
 });
+
+/* ---------- 수동 보정 브러시 ----------
+ * 결과 캔버스를 문질러 지우개(투명)/복원(원본) 편집.
+ * 편집은 editMask에 기록되어 엔진 재처리 후에도 유지된다. */
+
+function applyEditMaskAll() {
+  const m = state.editMask, wo = state.workingOut.data, src = state.srcData.data;
+  for (let i = 0, p = 0; i < m.length; i++, p += 4) {
+    if (m[i] === 1) wo[p + 3] = 0;
+    else if (m[i] === 2) { wo[p] = src[p]; wo[p + 1] = src[p + 1]; wo[p + 2] = src[p + 2]; wo[p + 3] = src[p + 3]; }
+  }
+}
+
+function paintCircle(cx, cy, radius, tool) {
+  const w = state.srcData.width, h = state.srcData.height;
+  const m = state.editMask, wo = state.workingOut.data, src = state.srcData.data;
+  const val = tool === 'erase' ? 1 : 2;
+  const x0 = Math.max(0, Math.floor(cx - radius)), x1 = Math.min(w - 1, Math.ceil(cx + radius));
+  const y0 = Math.max(0, Math.floor(cy - radius)), y1 = Math.min(h - 1, Math.ceil(cy + radius));
+  const r2 = radius * radius;
+  for (let y = y0; y <= y1; y++) {
+    const dy = y - cy;
+    for (let x = x0; x <= x1; x++) {
+      const dx = x - cx;
+      if (dx * dx + dy * dy > r2) continue;
+      const i = y * w + x, p = i * 4;
+      m[i] = val;
+      if (val === 1) { wo[p + 3] = 0; }
+      else { wo[p] = src[p]; wo[p + 1] = src[p + 1]; wo[p + 2] = src[p + 2]; wo[p + 3] = src[p + 3]; }
+    }
+  }
+  return [x0, y0, x1 - x0 + 1, y1 - y0 + 1];
+}
+
+function stampSegment(x0, y0, x1, y1, radius, tool) {
+  const dist = Math.hypot(x1 - x0, y1 - y0);
+  const steps = Math.max(1, Math.ceil(dist / Math.max(radius / 2, 1)));
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (let s = 0; s <= steps; s++) {
+    const t = s / steps;
+    const [rx, ry, rw, rh] = paintCircle(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, radius, tool);
+    if (rw <= 0 || rh <= 0) continue;
+    minX = Math.min(minX, rx); minY = Math.min(minY, ry);
+    maxX = Math.max(maxX, rx + rw); maxY = Math.max(maxY, ry + rh);
+  }
+  if (maxX > minX && maxY > minY) {
+    outCtx.putImageData(state.workingOut, 0, 0, minX, minY, maxX - minX, maxY - minY);
+  }
+}
+
+function rebuildEdits() {
+  if (!state.srcData) return;
+  state.editMask.fill(0);
+  state.workingOut = new ImageData(new Uint8ClampedArray(state.engineOut.data), state.engineOut.width, state.engineOut.height);
+  for (const st of state.strokes) {
+    const r = st.size / 2;
+    let prev = st.points[0];
+    for (const pt of st.points) {
+      const dist = Math.hypot(pt[0] - prev[0], pt[1] - prev[1]);
+      const steps = Math.max(1, Math.ceil(dist / Math.max(r / 2, 1)));
+      for (let s = 0; s <= steps; s++) {
+        const t = s / steps;
+        paintCircle(prev[0] + (pt[0] - prev[0]) * t, prev[1] + (pt[1] - prev[1]) * t, r, st.tool);
+      }
+      prev = pt;
+    }
+  }
+  outCtx.putImageData(state.workingOut, 0, 0);
+  updateBrushUI();
+}
+
+function canvasPos(e) {
+  const rect = els.outCanvas.getBoundingClientRect();
+  return [
+    (e.clientX - rect.left) * els.outCanvas.width / rect.width,
+    (e.clientY - rect.top) * els.outCanvas.height / rect.height,
+  ];
+}
+
+let activeStroke = null;
+
+els.outCanvas.addEventListener('pointerdown', (e) => {
+  if (!state.brushTool || !state.srcData) return;
+  e.preventDefault();
+  try { els.outCanvas.setPointerCapture(e.pointerId); } catch (_) {}
+  const [x, y] = canvasPos(e);
+  activeStroke = { tool: state.brushTool, size: state.brushSize, points: [[x, y]] };
+  stampSegment(x, y, x, y, state.brushSize / 2, state.brushTool);
+});
+
+els.outCanvas.addEventListener('pointermove', (e) => {
+  if (!activeStroke) return;
+  const [x, y] = canvasPos(e);
+  const last = activeStroke.points[activeStroke.points.length - 1];
+  activeStroke.points.push([x, y]);
+  stampSegment(last[0], last[1], x, y, activeStroke.size / 2, activeStroke.tool);
+});
+
+function endStroke() {
+  if (!activeStroke) return;
+  state.strokes.push(activeStroke);
+  activeStroke = null;
+  updateBrushUI();
+}
+els.outCanvas.addEventListener('pointerup', endStroke);
+els.outCanvas.addEventListener('pointercancel', endStroke);
+
+function updateBrushUI() {
+  els.brushExtras.hidden = !state.brushTool && state.strokes.length === 0;
+}
+
+function updateBrushCursor() {
+  if (!state.brushTool || !state.srcData) {
+    els.outCanvas.style.cursor = '';
+    els.outCanvas.style.touchAction = '';
+    return;
+  }
+  const rect = els.outCanvas.getBoundingClientRect();
+  const scale = rect.width && els.outCanvas.width ? rect.width / els.outCanvas.width : 1;
+  const d = Math.round(Math.max(6, Math.min(127, state.brushSize * scale)));
+  const r = d / 2;
+  const color = state.brushTool === 'erase' ? '#d64541' : '#007DC5';
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${d}" height="${d}"><circle cx="${r}" cy="${r}" r="${r - 1}" fill="none" stroke="${color}" stroke-width="1.5"/></svg>`;
+  els.outCanvas.style.cursor = `url('data:image/svg+xml;utf8,${encodeURIComponent(svg)}') ${Math.floor(r)} ${Math.floor(r)}, crosshair`;
+  els.outCanvas.style.touchAction = 'none'; // 터치 드로잉 중 스크롤 방지
+}
+
+els.brushBtns.forEach((btn) => btn.addEventListener('click', () => {
+  const tool = btn.dataset.tool;
+  state.brushTool = state.brushTool === tool ? null : tool;
+  els.brushBtns.forEach((b) => b.classList.toggle('active', b.dataset.tool === state.brushTool));
+  updateBrushUI();
+  updateBrushCursor();
+  if (state.brushTool) track('brush_enable', { tool: state.brushTool });
+}));
+
+els.brushSize.addEventListener('input', () => {
+  state.brushSize = Number(els.brushSize.value);
+  els.brushSizeVal.value = els.brushSize.value;
+  updateBrushCursor();
+});
+
+els.brushUndo.addEventListener('click', () => {
+  if (!state.strokes.length) return;
+  state.strokes.pop();
+  rebuildEdits();
+});
+
+els.brushClear.addEventListener('click', () => {
+  if (!state.strokes.length) return;
+  state.strokes = [];
+  rebuildEdits();
+});
+
+window.addEventListener('resize', updateBrushCursor);
 
 els.autoBg.addEventListener('click', () => {
   if (!state.srcData) return;

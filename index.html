@@ -21,7 +21,7 @@ if (location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
 </script>
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
 <link rel="apple-touch-icon" href="assets/favicon-180.png">
-<link rel="stylesheet" href="style.css?v=5">
+<link rel="stylesheet" href="style.css?v=6">
 </head>
 <body>
 
@@ -63,6 +63,23 @@ if (location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
         <span id="bg-swatch" title="현재 배경색"></span>
         <button id="auto-bg" class="small-btn">자동 감지</button>
         <span class="hint">원본 이미지를 클릭하면 그 색이 배경색이 됩니다</span>
+      </div>
+
+      <div class="group">
+        <span class="group-label">수동 보정</span>
+        <div class="segmented">
+          <button class="brush-btn" data-tool="erase" title="문지른 곳을 투명하게 지웁니다">지우개</button>
+          <button class="brush-btn" data-tool="restore" title="문지른 곳을 원본으로 되살립니다">복원</button>
+        </div>
+        <span class="brush-extras" id="brush-extras" hidden>
+          <label class="brush-size-row">
+            <span>크기</span>
+            <input type="range" id="brush-size" min="4" max="120" value="30">
+            <output id="brush-size-val">30</output>
+          </label>
+          <button id="brush-undo" class="small-btn">되돌리기</button>
+          <button id="brush-clear" class="small-btn">보정 초기화</button>
+        </span>
       </div>
 
       <div class="group sliders">
@@ -107,7 +124,7 @@ if (location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
         <div class="pane-body"><canvas id="src-canvas"></canvas></div>
       </figure>
       <figure>
-        <figcaption>결과 (투명 미리보기)</figcaption>
+        <figcaption>결과 (투명 미리보기) <em>— 지우개·복원 브러시로 세밀하게 보정할 수 있습니다</em></figcaption>
         <div class="pane-body checker"><canvas id="out-canvas"></canvas></div>
       </figure>
     </div>
@@ -140,6 +157,6 @@ if (location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
   <p class="footer-meta">배경 지우개 · 100% 브라우저 처리(자체 엔진) · PNG/JPG/WebP 지원 · 방문 통계 수집에 Google Analytics를 사용합니다</p>
 </footer>
 
-<script src="app.js?v=6"></script>
+<script src="app.js?v=7"></script>
 </body>
 </html>

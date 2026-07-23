@@ -140,7 +140,7 @@ main { flex: 1; width: 100%; max-width: 1060px; margin: 0 auto; padding: 28px 16
 .hint { font-size: 0.78rem; color: #9aa3ad; }
 
 .segmented { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
-.mode-btn {
+.mode-btn, .brush-btn {
   padding: 8px 13px;
   border: none;
   background: transparent;
@@ -150,9 +150,17 @@ main { flex: 1; width: 100%; max-width: 1060px; margin: 0 auto; padding: 28px 16
   color: var(--ink-soft);
   transition: background 0.12s, color 0.12s;
 }
-.mode-btn + .mode-btn { border-left: 1px solid var(--line); }
-.mode-btn:hover:not(.active) { background: #f0f7fc; color: var(--road-blue); }
-.mode-btn.active { background: var(--road-blue); color: #fff; font-weight: 700; }
+.mode-btn + .mode-btn, .brush-btn + .brush-btn { border-left: 1px solid var(--line); }
+.mode-btn:hover:not(.active), .brush-btn:hover:not(.active) { background: #f0f7fc; color: var(--road-blue); }
+.mode-btn.active, .brush-btn.active { background: var(--road-blue); color: #fff; font-weight: 700; }
+.brush-btn[data-tool="erase"].active { background: #d64541; }
+
+/* ---- 수동 보정 브러시 ---- */
+.brush-extras { display: inline-flex; align-items: center; gap: 10px; }
+.brush-extras[hidden] { display: none; }
+.brush-size-row { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--ink-soft); }
+.brush-size-row input[type="range"] { width: 110px; accent-color: var(--road-blue); }
+.brush-size-row output { width: 26px; text-align: right; font-variant-numeric: tabular-nums; color: var(--ink); }
 
 #bg-swatch {
   width: 26px; height: 26px;
