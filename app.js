@@ -205,6 +205,11 @@ function scheduleProcess() {
 
 function setStatus(msg) { els.status.textContent = msg; }
 
+/* ---- 사용 통계 (Google Analytics — index.html에서 로드, 로컬에선 미로드) ---- */
+function track(name, params) {
+  if (typeof gtag === 'function') gtag('event', name, params);
+}
+
 function updateSwatch() {
   els.swatch.style.background = `rgb(${state.bg.r}, ${state.bg.g}, ${state.bg.b})`;
 }
@@ -231,34 +236,36 @@ function loadFromSrc(src, name) {
   img.src = src;
 }
 
-function loadFile(file) {
+function loadFile(file, source) {
   if (!file || !file.type.startsWith('image/')) return;
   const reader = new FileReader();
   reader.onload = () => loadFromSrc(reader.result, file.name);
   reader.readAsDataURL(file);
+  track('image_load', { source: source || 'file' });
 }
 
 /* ---------- 이벤트 연결 ---------- */
 
 els.dropzone.addEventListener('click', () => els.fileInput.click());
-els.fileInput.addEventListener('change', () => loadFile(els.fileInput.files[0]));
+els.fileInput.addEventListener('change', () => loadFile(els.fileInput.files[0], 'picker'));
 
 window.addEventListener('dragover', (e) => { e.preventDefault(); els.dropzone.classList.add('dragover'); });
 window.addEventListener('dragleave', () => els.dropzone.classList.remove('dragover'));
 window.addEventListener('drop', (e) => {
   e.preventDefault();
   els.dropzone.classList.remove('dragover');
-  loadFile(e.dataTransfer.files[0]);
+  loadFile(e.dataTransfer.files[0], 'drop');
 });
 
 window.addEventListener('paste', (e) => {
   for (const item of e.clipboardData.items) {
-    if (item.type.startsWith('image/')) { loadFile(item.getAsFile()); return; }
+    if (item.type.startsWith('image/')) { loadFile(item.getAsFile(), 'paste'); return; }
   }
 });
 
 els.modeBtns.forEach((btn) => btn.addEventListener('click', () => {
   state.mode = btn.dataset.mode;
+  track('mode_change', { mode: state.mode });
   els.modeBtns.forEach((b) => b.classList.toggle('active', b === btn));
   els.sliderRows.forEach((row) => { row.hidden = !row.dataset.modes.split(' ').includes(state.mode); });
   scheduleProcess();
@@ -332,6 +339,7 @@ function buildExportCanvas() {
 }
 
 els.download.addEventListener('click', () => {
+  track('download', { mode: state.mode, trim: els.trim.checked ? 'on' : 'off' });
   buildExportCanvas().toBlob((blob) => {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
