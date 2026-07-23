@@ -690,14 +690,18 @@ function bindPan(pane) {
     if (e.pointerType !== 'mouse') return;
     if (e.button !== 0 && e.button !== 1) return;
     if (pane === els.outPane && state.brushTool && e.button === 0) return;
-    panState = { pane, x: e.clientX, y: e.clientY, sl: pane.scrollLeft, st: pane.scrollTop };
+    panState = { pane, x: e.clientX, y: e.clientY, sl: pane.scrollLeft, st: pane.scrollTop, id: e.pointerId };
     didPan = false;
-    try { pane.setPointerCapture(e.pointerId); } catch (_) {}
+    // 주의: 여기서 setPointerCapture를 걸면 click 이벤트가 패널로 넘어가
+    // 캔버스의 스포이드 클릭이 죽는다 — 실제 드래그 시작 후에만 캡처
   });
   pane.addEventListener('pointermove', (e) => {
     if (!panState || panState.pane !== pane) return;
     const dx = e.clientX - panState.x, dy = e.clientY - panState.y;
-    if (Math.abs(dx) + Math.abs(dy) > 4) didPan = true;
+    if (!didPan && Math.abs(dx) + Math.abs(dy) > 4) {
+      didPan = true;
+      try { pane.setPointerCapture(panState.id); } catch (_) {}
+    }
     if (!didPan) return;
     // 양쪽 패널을 직접 동시에 이동 (scroll 이벤트에 의존하지 않음)
     els.srcPane.scrollLeft = els.outPane.scrollLeft = panState.sl - dx;
