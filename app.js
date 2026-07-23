@@ -26,7 +26,6 @@ const els = {
   autoBg: $('#auto-bg'),
   download: $('#download'),
   trim: $('#trim'),
-  exportScale: $('#export-scale'),
   denoise: $('#denoise'),
   sharpen: $('#sharpen'), sharpenVal: $('#sharpen-val'),
   status: $('#status'),
@@ -753,38 +752,23 @@ function contentBBox(imageData) {
 }
 
 function buildExportCanvas() {
-  let base = els.outCanvas;
-  if (els.trim.checked) {
-    const w = els.outCanvas.width, h = els.outCanvas.height;
-    const img = outCtx.getImageData(0, 0, w, h);
-    const box = contentBBox(img);
-    if (box && (box.w !== w || box.h !== h)) {
-      const c = document.createElement('canvas');
-      c.width = box.w; c.height = box.h;
-      c.getContext('2d').putImageData(img, -box.x, -box.y);
-      base = c;
-    }
-  }
-  const scale = Number(els.exportScale.value) || 1;
-  if (scale > 1) {
-    const up = document.createElement('canvas');
-    up.width = base.width * scale; up.height = base.height * scale;
-    const g = up.getContext('2d');
-    g.imageSmoothingEnabled = true;
-    g.imageSmoothingQuality = 'high';
-    g.drawImage(base, 0, 0, up.width, up.height);
-    return up;
-  }
-  return base;
+  if (!els.trim.checked) return els.outCanvas;
+  const w = els.outCanvas.width, h = els.outCanvas.height;
+  const img = outCtx.getImageData(0, 0, w, h);
+  const box = contentBBox(img);
+  if (!box || (box.w === w && box.h === h)) return els.outCanvas;
+  const c = document.createElement('canvas');
+  c.width = box.w; c.height = box.h;
+  c.getContext('2d').putImageData(img, -box.x, -box.y);
+  return c;
 }
 
 els.download.addEventListener('click', () => {
-  const scale = Number(els.exportScale.value) || 1;
-  track('download', { mode: state.mode, trim: els.trim.checked ? 'on' : 'off', scale });
+  track('download', { mode: state.mode, trim: els.trim.checked ? 'on' : 'off' });
   buildExportCanvas().toBlob((blob) => {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `${state.fileName}_transparent${scale > 1 ? '@' + scale + 'x' : ''}.png`;
+    a.download = `${state.fileName}_transparent.png`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   }, 'image/png');
