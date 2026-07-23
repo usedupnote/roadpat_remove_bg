@@ -187,7 +187,8 @@ button { font: inherit; cursor: pointer; }
   color: var(--ink);
   transition: border-color 0.12s, color 0.12s;
 }
-.small-btn:hover { border-color: var(--road-blue); color: var(--road-blue); }
+.small-btn:hover:not(:disabled) { border-color: var(--road-blue); color: var(--road-blue); }
+.small-btn:disabled { opacity: 0.45; cursor: default; }
 .primary {
   padding: 10px 20px;
   border: none;

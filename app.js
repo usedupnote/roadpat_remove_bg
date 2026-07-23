@@ -30,7 +30,7 @@ const els = {
   brushBtns: document.querySelectorAll('.brush-btn'),
   brushExtras: $('#brush-extras'),
   brushSize: $('#brush-size'), brushSizeVal: $('#brush-size-val'),
-  brushUndo: $('#brush-undo'), brushClear: $('#brush-clear'),
+  brushUndo: $('#brush-undo'), brushRedo: $('#brush-redo'), brushClear: $('#brush-clear'),
 };
 
 const srcCtx = els.srcCanvas.getContext('2d', { willReadFrequently: true });
@@ -51,6 +51,7 @@ const state = {
   brushTool: null, // null | 'erase' | 'restore'
   brushSize: 30,   // 지름(이미지 px)
   strokes: [],     // 획 목록 [{tool, size, points:[[x,y],...]}] — 되돌리기용
+  redoStrokes: [], // 되돌린 획 보관 — 다시 실행용 (새 획을 그리면 비움)
   editMask: null,  // Uint8Array w*h: 0=없음 1=지움 2=복원
   engineOut: null, // 엔진 결과 ImageData (편집 미적용)
   workingOut: null,// 화면 표시 = engineOut + editMask
@@ -242,6 +243,7 @@ function loadFromSrc(src, name) {
     state.distMap = null;
     state.editMask = new Uint8Array(w * h);
     state.strokes = [];
+    state.redoStrokes = [];
     state.bg = detectBg(state.srcData.data, w, h);
     updateSwatch();
     updateBrushUI();
@@ -414,6 +416,7 @@ els.outCanvas.addEventListener('pointermove', (e) => {
 function endStroke() {
   if (!activeStroke) return;
   state.strokes.push(activeStroke);
+  state.redoStrokes = []; // 새 획을 그리면 다시 실행 이력은 무효
   activeStroke = null;
   updateBrushUI();
 }
@@ -421,7 +424,9 @@ els.outCanvas.addEventListener('pointerup', endStroke);
 els.outCanvas.addEventListener('pointercancel', endStroke);
 
 function updateBrushUI() {
-  els.brushExtras.hidden = !state.brushTool && state.strokes.length === 0;
+  els.brushExtras.hidden = !state.brushTool && !state.strokes.length && !state.redoStrokes.length;
+  els.brushUndo.disabled = !state.strokes.length;
+  els.brushRedo.disabled = !state.redoStrokes.length;
 }
 
 function updateBrushCursor() {
@@ -455,16 +460,40 @@ els.brushSize.addEventListener('input', () => {
   updateBrushCursor();
 });
 
-els.brushUndo.addEventListener('click', () => {
+function undoStroke() {
   if (!state.strokes.length) return;
-  state.strokes.pop();
+  state.redoStrokes.push(state.strokes.pop());
+  rebuildEdits();
+}
+
+function redoStroke() {
+  if (!state.redoStrokes.length) return;
+  state.strokes.push(state.redoStrokes.pop());
+  rebuildEdits();
+}
+
+els.brushUndo.addEventListener('click', undoStroke);
+els.brushRedo.addEventListener('click', redoStroke);
+
+els.brushClear.addEventListener('click', () => {
+  if (!state.strokes.length && !state.redoStrokes.length) return;
+  state.strokes = [];
+  state.redoStrokes = [];
   rebuildEdits();
 });
 
-els.brushClear.addEventListener('click', () => {
-  if (!state.strokes.length) return;
-  state.strokes = [];
-  rebuildEdits();
+// Ctrl+Z 되돌리기 / Ctrl+Shift+Z·Ctrl+Y 다시 실행 (Mac ⌘ 포함)
+window.addEventListener('keydown', (e) => {
+  if (!state.srcData) return;
+  if (!(e.ctrlKey || e.metaKey)) return;
+  const key = e.key.toLowerCase();
+  if (key === 'z') {
+    e.preventDefault();
+    if (e.shiftKey) redoStroke(); else undoStroke();
+  } else if (key === 'y') {
+    e.preventDefault();
+    redoStroke();
+  }
 });
 
 window.addEventListener('resize', updateBrushCursor);
