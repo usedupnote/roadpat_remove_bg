@@ -21,7 +21,7 @@ if (location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
 </script>
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
 <link rel="apple-touch-icon" href="assets/favicon-180.png">
-<link rel="stylesheet" href="style.css?v=7">
+<link rel="stylesheet" href="style.css?v=9">
 </head>
 <body>
 
@@ -72,9 +72,13 @@ if (location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
           <button class="brush-btn" data-tool="restore" title="문지른 곳을 원본으로 되살립니다">복원</button>
         </div>
         <span class="brush-extras" id="brush-extras" hidden>
+          <div class="segmented">
+            <button class="shape-btn active" data-shape="circle" title="원형 브러시">●</button>
+            <button class="shape-btn" data-shape="square" title="사각형 브러시">■</button>
+          </div>
           <label class="brush-size-row">
             <span>크기</span>
-            <input type="range" id="brush-size" min="4" max="120" value="30">
+            <input type="range" id="brush-size" min="4" max="200" value="30">
             <output id="brush-size-val">30</output>
           </label>
           <button id="brush-undo" class="small-btn" title="Ctrl+Z">되돌리기</button>
@@ -119,14 +123,23 @@ if (location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
       </div>
     </div>
 
+    <div class="view-bar">
+      <span class="group-label">보기</span>
+      <button id="zoom-out" class="small-btn" title="축소">−</button>
+      <output id="zoom-val">100%</output>
+      <button id="zoom-in" class="small-btn" title="확대">＋</button>
+      <button id="zoom-fit" class="small-btn">화면 맞춤</button>
+      <span class="hint">Ctrl+휠로 확대·축소 · 드래그로 이동 — 원본과 결과가 같은 위치를 보여줍니다</span>
+    </div>
+
     <div class="panes">
       <figure>
         <figcaption>원본 <em>— 클릭하면 그 색을 배경색으로 선택</em></figcaption>
-        <div class="pane-body"><canvas id="src-canvas"></canvas></div>
+        <div class="pane-body" id="src-pane"><canvas id="src-canvas"></canvas></div>
       </figure>
       <figure>
         <figcaption>결과 (투명 미리보기) <em>— 지우개·복원 브러시로 세밀하게 보정할 수 있습니다</em></figcaption>
-        <div class="pane-body checker"><canvas id="out-canvas"></canvas></div>
+        <div class="pane-body checker" id="out-pane"><canvas id="out-canvas"></canvas></div>
       </figure>
     </div>
 
@@ -158,6 +171,6 @@ if (location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
   <p class="footer-meta">배경 지우개 · 100% 브라우저 처리(자체 엔진) · PNG/JPG/WebP 지원 · 방문 통계 수집에 Google Analytics를 사용합니다</p>
 </footer>
 
-<script src="app.js?v=8"></script>
+<script src="app.js?v=10"></script>
 </body>
 </html>

@@ -140,7 +140,7 @@ main { flex: 1; width: 100%; max-width: 1060px; margin: 0 auto; padding: 28px 16
 .hint { font-size: 0.78rem; color: #9aa3ad; }
 
 .segmented { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
-.mode-btn, .brush-btn {
+.mode-btn, .brush-btn, .shape-btn {
   padding: 8px 13px;
   border: none;
   background: transparent;
@@ -150,9 +150,10 @@ main { flex: 1; width: 100%; max-width: 1060px; margin: 0 auto; padding: 28px 16
   color: var(--ink-soft);
   transition: background 0.12s, color 0.12s;
 }
-.mode-btn + .mode-btn, .brush-btn + .brush-btn { border-left: 1px solid var(--line); }
-.mode-btn:hover:not(.active), .brush-btn:hover:not(.active) { background: #f0f7fc; color: var(--road-blue); }
-.mode-btn.active, .brush-btn.active { background: var(--road-blue); color: #fff; font-weight: 700; }
+.mode-btn + .mode-btn, .brush-btn + .brush-btn, .shape-btn + .shape-btn { border-left: 1px solid var(--line); }
+.mode-btn:hover:not(.active), .brush-btn:hover:not(.active), .shape-btn:hover:not(.active) { background: #f0f7fc; color: var(--road-blue); }
+.mode-btn.active, .brush-btn.active, .shape-btn.active { background: var(--road-blue); color: #fff; font-weight: 700; }
+.shape-btn { padding: 8px 10px; font-size: 0.78rem; }
 .brush-btn[data-tool="erase"].active { background: #d64541; }
 
 /* ---- 수동 보정 브러시 ---- */
@@ -205,16 +206,32 @@ button { font: inherit; cursor: pointer; }
   box-shadow: 0 4px 12px rgba(0, 125, 197, 0.35);
 }
 
+/* ---- 보기(확대·이동) 바 ---- */
+.view-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+.view-bar output {
+  min-width: 48px;
+  text-align: center;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
 /* ---- 미리보기 ---- */
 .panes {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 16px;
-  margin-top: 16px;
+  margin-top: 10px;
 }
 @media (max-width: 720px) { .panes { grid-template-columns: 1fr; } }
 
-.panes figure { margin: 0; }
+.panes figure { margin: 0; min-width: 0; } /* min-width:0 — 캔버스가 커져도 그리드 트랙이 늘어나지 않게 */
 .panes figcaption { font-size: 0.85rem; color: var(--ink-soft); margin-bottom: 6px; }
 .panes figcaption em { font-style: normal; color: #9aa3ad; }
 .pane-body {
@@ -224,8 +241,10 @@ button { font: inherit; cursor: pointer; }
   max-height: 70vh;
   background: var(--card);
   box-shadow: 0 1px 3px rgba(15, 23, 38, 0.05);
+  scrollbar-gutter: stable; /* 스크롤바 등장으로 폭이 변해 확대 계산이 출렁이는 것 방지 */
 }
-.pane-body canvas { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+.pane-body canvas { display: block; height: auto; margin: 0 auto; } /* 폭은 JS(applyView)가 제어 */
+.pane-body canvas.pixelated { image-rendering: pixelated; } /* 고배율에서 픽셀 경계 확인용 */
 #src-canvas { cursor: crosshair; }
 
 .checker {

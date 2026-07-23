@@ -27,7 +27,10 @@ const els = {
   download: $('#download'),
   trim: $('#trim'),
   status: $('#status'),
+  srcPane: $('#src-pane'), outPane: $('#out-pane'),
+  zoomIn: $('#zoom-in'), zoomOut: $('#zoom-out'), zoomFit: $('#zoom-fit'), zoomVal: $('#zoom-val'),
   brushBtns: document.querySelectorAll('.brush-btn'),
+  shapeBtns: document.querySelectorAll('.shape-btn'),
   brushExtras: $('#brush-extras'),
   brushSize: $('#brush-size'), brushSizeVal: $('#brush-size-val'),
   brushUndo: $('#brush-undo'), brushRedo: $('#brush-redo'), brushClear: $('#brush-clear'),
@@ -50,6 +53,8 @@ const state = {
   // 수동 보정 브러시: 엔진 결과와 분리된 편집 레이어라 재처리에도 유지됨
   brushTool: null, // null | 'erase' | 'restore'
   brushSize: 30,   // 지름(이미지 px)
+  brushShape: 'circle', // 'circle' | 'square'
+  zoom: 1,         // 1 = 패널 폭 맞춤, 최대 8배
   strokes: [],     // 획 목록 [{tool, size, points:[[x,y],...]}] — 되돌리기용
   redoStrokes: [], // 되돌린 획 보관 — 다시 실행용 (새 획을 그리면 비움)
   editMask: null,  // Uint8Array w*h: 0=없음 1=지움 2=복원
@@ -250,6 +255,8 @@ function loadFromSrc(src, name) {
     updateBrushCursor();
     els.dropzone.classList.add('compact');
     els.editor.hidden = false;
+    state.zoom = 1;
+    applyView();
     process();
   };
   img.onerror = () => setStatus('이미지를 불러올 수 없습니다. 다른 파일로 시도해 주세요.');
@@ -306,6 +313,7 @@ bindSlider(els.despeckle, els.despeckleVal, 'despeckle');
 
 els.srcCanvas.addEventListener('click', (e) => {
   if (!state.srcData) return;
+  if (didPan) return; // 드래그 이동 직후엔 스포이드 동작 안 함
   const rect = els.srcCanvas.getBoundingClientRect();
   const x = Math.floor((e.clientX - rect.left) * els.srcCanvas.width / rect.width);
   const y = Math.floor((e.clientY - rect.top) * els.srcCanvas.height / rect.height);
@@ -328,10 +336,11 @@ function applyEditMaskAll() {
   }
 }
 
-function paintCircle(cx, cy, radius, tool) {
+function paintStamp(cx, cy, radius, tool, shape) {
   const w = state.srcData.width, h = state.srcData.height;
   const m = state.editMask, wo = state.workingOut.data, src = state.srcData.data;
   const val = tool === 'erase' ? 1 : 2;
+  const square = shape === 'square';
   const x0 = Math.max(0, Math.floor(cx - radius)), x1 = Math.min(w - 1, Math.ceil(cx + radius));
   const y0 = Math.max(0, Math.floor(cy - radius)), y1 = Math.min(h - 1, Math.ceil(cy + radius));
   const r2 = radius * radius;
@@ -339,7 +348,7 @@ function paintCircle(cx, cy, radius, tool) {
     const dy = y - cy;
     for (let x = x0; x <= x1; x++) {
       const dx = x - cx;
-      if (dx * dx + dy * dy > r2) continue;
+      if (!square && dx * dx + dy * dy > r2) continue;
       const i = y * w + x, p = i * 4;
       m[i] = val;
       if (val === 1) { wo[p + 3] = 0; }
@@ -349,13 +358,13 @@ function paintCircle(cx, cy, radius, tool) {
   return [x0, y0, x1 - x0 + 1, y1 - y0 + 1];
 }
 
-function stampSegment(x0, y0, x1, y1, radius, tool) {
+function stampSegment(x0, y0, x1, y1, radius, tool, shape) {
   const dist = Math.hypot(x1 - x0, y1 - y0);
   const steps = Math.max(1, Math.ceil(dist / Math.max(radius / 2, 1)));
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (let s = 0; s <= steps; s++) {
     const t = s / steps;
-    const [rx, ry, rw, rh] = paintCircle(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, radius, tool);
+    const [rx, ry, rw, rh] = paintStamp(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, radius, tool, shape);
     if (rw <= 0 || rh <= 0) continue;
     minX = Math.min(minX, rx); minY = Math.min(minY, ry);
     maxX = Math.max(maxX, rx + rw); maxY = Math.max(maxY, ry + rh);
@@ -377,7 +386,7 @@ function rebuildEdits() {
       const steps = Math.max(1, Math.ceil(dist / Math.max(r / 2, 1)));
       for (let s = 0; s <= steps; s++) {
         const t = s / steps;
-        paintCircle(prev[0] + (pt[0] - prev[0]) * t, prev[1] + (pt[1] - prev[1]) * t, r, st.tool);
+        paintStamp(prev[0] + (pt[0] - prev[0]) * t, prev[1] + (pt[1] - prev[1]) * t, r, st.tool, st.shape);
       }
       prev = pt;
     }
@@ -401,8 +410,8 @@ els.outCanvas.addEventListener('pointerdown', (e) => {
   e.preventDefault();
   try { els.outCanvas.setPointerCapture(e.pointerId); } catch (_) {}
   const [x, y] = canvasPos(e);
-  activeStroke = { tool: state.brushTool, size: state.brushSize, points: [[x, y]] };
-  stampSegment(x, y, x, y, state.brushSize / 2, state.brushTool);
+  activeStroke = { tool: state.brushTool, size: state.brushSize, shape: state.brushShape, points: [[x, y]] };
+  stampSegment(x, y, x, y, state.brushSize / 2, state.brushTool, state.brushShape);
 });
 
 els.outCanvas.addEventListener('pointermove', (e) => {
@@ -410,7 +419,7 @@ els.outCanvas.addEventListener('pointermove', (e) => {
   const [x, y] = canvasPos(e);
   const last = activeStroke.points[activeStroke.points.length - 1];
   activeStroke.points.push([x, y]);
-  stampSegment(last[0], last[1], x, y, activeStroke.size / 2, activeStroke.tool);
+  stampSegment(last[0], last[1], x, y, activeStroke.size / 2, activeStroke.tool, activeStroke.shape);
 });
 
 function endStroke() {
@@ -440,7 +449,10 @@ function updateBrushCursor() {
   const d = Math.round(Math.max(6, Math.min(127, state.brushSize * scale)));
   const r = d / 2;
   const color = state.brushTool === 'erase' ? '#d64541' : '#007DC5';
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${d}" height="${d}"><circle cx="${r}" cy="${r}" r="${r - 1}" fill="none" stroke="${color}" stroke-width="1.5"/></svg>`;
+  const inner = state.brushShape === 'square'
+    ? `<rect x="1" y="1" width="${d - 2}" height="${d - 2}" fill="none" stroke="${color}" stroke-width="1.5"/>`
+    : `<circle cx="${r}" cy="${r}" r="${r - 1}" fill="none" stroke="${color}" stroke-width="1.5"/>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${d}" height="${d}">${inner}</svg>`;
   els.outCanvas.style.cursor = `url('data:image/svg+xml;utf8,${encodeURIComponent(svg)}') ${Math.floor(r)} ${Math.floor(r)}, crosshair`;
   els.outCanvas.style.touchAction = 'none'; // 터치 드로잉 중 스크롤 방지
 }
@@ -459,6 +471,12 @@ els.brushSize.addEventListener('input', () => {
   els.brushSizeVal.value = els.brushSize.value;
   updateBrushCursor();
 });
+
+els.shapeBtns.forEach((btn) => btn.addEventListener('click', () => {
+  state.brushShape = btn.dataset.shape;
+  els.shapeBtns.forEach((b) => b.classList.toggle('active', b === btn));
+  updateBrushCursor();
+}));
 
 function undoStroke() {
   if (!state.strokes.length) return;
@@ -496,7 +514,103 @@ window.addEventListener('keydown', (e) => {
   }
 });
 
-window.addEventListener('resize', updateBrushCursor);
+/* ---------- 보기: 폭 맞춤 + 확대·축소 + 동기화 이동 ----------
+ * 캔버스 픽셀은 그대로 두고 CSS 폭만 바꾸는 방식이라
+ * 엔진·브러시의 좌표 변환(rect 기반)이 자동으로 맞는다. */
+
+function applyView() {
+  if (!state.srcData) return;
+  const paneW = els.srcPane.clientWidth || state.srcData.width;
+  const cssW = Math.round(paneW * state.zoom);
+  els.srcCanvas.style.width = cssW + 'px';
+  els.outCanvas.style.width = cssW + 'px';
+  const pixelScale = cssW / state.srcData.width;
+  els.srcCanvas.classList.toggle('pixelated', pixelScale >= 2);
+  els.outCanvas.classList.toggle('pixelated', pixelScale >= 2);
+  els.zoomVal.value = Math.round(state.zoom * 100) + '%';
+  updateBrushCursor();
+}
+
+function setZoomAnchored(z, clientX, clientY, pane) {
+  z = Math.min(8, Math.max(1, z));
+  if (!state.srcData) return;
+  const p = pane || els.srcPane;
+  const rect = p.getBoundingClientRect();
+  const ax = clientX !== undefined ? clientX - rect.left : rect.width / 2;
+  const ay = clientY !== undefined ? clientY - rect.top : rect.height / 2;
+  const k = z / state.zoom;
+  const sl = (p.scrollLeft + ax) * k - ax;
+  const st = (p.scrollTop + ay) * k - ay;
+  state.zoom = z;
+  applyView();
+  els.srcPane.scrollLeft = els.outPane.scrollLeft = sl;
+  els.srcPane.scrollTop = els.outPane.scrollTop = st;
+}
+
+els.zoomIn.addEventListener('click', () => setZoomAnchored(state.zoom * 1.5));
+els.zoomOut.addEventListener('click', () => setZoomAnchored(state.zoom / 1.5));
+els.zoomFit.addEventListener('click', () => setZoomAnchored(1));
+
+// Ctrl+휠(트랙패드 핀치 포함)로 커서 위치 기준 확대·축소
+[els.srcPane, els.outPane].forEach((pane) => {
+  pane.addEventListener('wheel', (e) => {
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    const k = e.deltaY < 0 ? 1.2 : 1 / 1.2;
+    setZoomAnchored(state.zoom * k, e.clientX, e.clientY, pane);
+  }, { passive: false });
+});
+
+// 양쪽 패널 스크롤 동기화 — 스크롤바·휠 등 네이티브 스크롤용
+// (팬 드래그·줌은 위에서 양쪽을 직접 쓰므로 여기 의존하지 않음)
+let syncingScroll = false;
+function bindScrollSync(a, b) {
+  a.addEventListener('scroll', () => {
+    if (syncingScroll) return;
+    syncingScroll = true;
+    b.scrollLeft = a.scrollLeft;
+    b.scrollTop = a.scrollTop;
+    setTimeout(() => { syncingScroll = false; }, 0);
+  });
+}
+bindScrollSync(els.srcPane, els.outPane);
+bindScrollSync(els.outPane, els.srcPane);
+
+// 마우스 드래그로 이동 (터치는 기본 스크롤 사용, 브러시 사용 중엔 브러시 우선)
+let panState = null;
+let didPan = false;
+function bindPan(pane) {
+  pane.addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'mouse') return;
+    if (e.button !== 0 && e.button !== 1) return;
+    if (pane === els.outPane && state.brushTool && e.button === 0) return;
+    panState = { pane, x: e.clientX, y: e.clientY, sl: pane.scrollLeft, st: pane.scrollTop };
+    didPan = false;
+    try { pane.setPointerCapture(e.pointerId); } catch (_) {}
+  });
+  pane.addEventListener('pointermove', (e) => {
+    if (!panState || panState.pane !== pane) return;
+    const dx = e.clientX - panState.x, dy = e.clientY - panState.y;
+    if (Math.abs(dx) + Math.abs(dy) > 4) didPan = true;
+    if (!didPan) return;
+    // 양쪽 패널을 직접 동시에 이동 (scroll 이벤트에 의존하지 않음)
+    els.srcPane.scrollLeft = els.outPane.scrollLeft = panState.sl - dx;
+    els.srcPane.scrollTop = els.outPane.scrollTop = panState.st - dy;
+    pane.style.cursor = 'grabbing';
+  });
+  const endPan = () => {
+    if (!panState || panState.pane !== pane) return;
+    panState = null;
+    pane.style.cursor = '';
+    setTimeout(() => { didPan = false; }, 0); // click(스포이드)보다 늦게 해제
+  };
+  pane.addEventListener('pointerup', endPan);
+  pane.addEventListener('pointercancel', endPan);
+}
+bindPan(els.srcPane);
+bindPan(els.outPane);
+
+window.addEventListener('resize', () => { applyView(); updateBrushCursor(); });
 
 els.autoBg.addEventListener('click', () => {
   if (!state.srcData) return;
