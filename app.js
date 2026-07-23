@@ -26,6 +26,9 @@ const els = {
   autoBg: $('#auto-bg'),
   download: $('#download'),
   trim: $('#trim'),
+  exportScale: $('#export-scale'),
+  denoise: $('#denoise'),
+  sharpen: $('#sharpen'), sharpenVal: $('#sharpen-val'),
   status: $('#status'),
   srcPane: $('#src-pane'), outPane: $('#out-pane'),
   zoomIn: $('#zoom-in'), zoomOut: $('#zoom-out'), zoomFit: $('#zoom-fit'), zoomVal: $('#zoom-val'),
@@ -48,7 +51,10 @@ const state = {
   strength: 110,
   despeckle: 8,
   bg: { r: 255, g: 255, b: 255 },
-  srcData: null,   // 원본 ImageData (불변)
+  rawData: null,   // 업로드된 그대로의 원본 (화질 개선의 입력)
+  median: false,   // 잡티 완화 (3x3 중앙값 필터)
+  sharpen: 0,      // 선명하게 0~100 (언샤프 마스크)
+  srcData: null,   // 화질 개선 적용된 작업 원본 — 엔진·브러시가 사용
   distMap: null,   // 배경색 기준 색 거리 캐시 (bg/이미지 변경 시 무효화)
   // 수동 보정 브러시: 엔진 결과와 분리된 편집 레이어라 재처리에도 유지됨
   brushTool: null, // null | 'erase' | 'restore'
@@ -244,7 +250,9 @@ function loadFromSrc(src, name) {
     els.srcCanvas.width = w; els.srcCanvas.height = h;
     els.outCanvas.width = w; els.outCanvas.height = h;
     srcCtx.drawImage(img, 0, 0);
-    state.srcData = srcCtx.getImageData(0, 0, w, h);
+    state.rawData = srcCtx.getImageData(0, 0, w, h);
+    state.srcData = buildEnhanced();
+    srcCtx.putImageData(state.srcData, 0, 0);
     state.distMap = null;
     state.editMask = new Uint8Array(w * h);
     state.strokes = [];
@@ -322,6 +330,104 @@ els.srcCanvas.addEventListener('click', (e) => {
   state.distMap = null;
   updateSwatch();
   scheduleProcess();
+});
+
+/* ---------- 화질 개선 (배경 제거 전 원본에 적용) ---------- */
+
+// 3x3 중앙값 필터 — JPEG 압축 잡티·점 노이즈 정리 (RGB만, 알파 유지)
+function medianFilter(img) {
+  const { data, width: w, height: h } = img;
+  const src = new Uint8ClampedArray(data);
+  const buf = new Uint8Array(9);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const p = (y * w + x) * 4;
+      for (let c = 0; c < 3; c++) {
+        let n = 0;
+        for (let dy = -1; dy <= 1; dy++) {
+          const yy = dy < 0 ? Math.max(0, y + dy) : Math.min(h - 1, y + dy);
+          for (let dx = -1; dx <= 1; dx++) {
+            const xx = dx < 0 ? Math.max(0, x + dx) : Math.min(w - 1, x + dx);
+            buf[n++] = src[(yy * w + xx) * 4 + c];
+          }
+        }
+        // 9개 삽입 정렬 후 중앙값
+        for (let i = 1; i < 9; i++) {
+          const v = buf[i]; let j = i - 1;
+          while (j >= 0 && buf[j] > v) { buf[j + 1] = buf[j]; j--; }
+          buf[j + 1] = v;
+        }
+        data[p + c] = buf[4];
+      }
+    }
+  }
+}
+
+// 3x3 평균 블러 (RGB) — 언샤프 마스크용
+function blur3x3RGB(src, w, h) {
+  const out = new Uint8ClampedArray(src.length);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const p = (y * w + x) * 4;
+      for (let c = 0; c < 3; c++) {
+        let sum = 0;
+        for (let dy = -1; dy <= 1; dy++) {
+          const yy = dy < 0 ? Math.max(0, y + dy) : Math.min(h - 1, y + dy);
+          for (let dx = -1; dx <= 1; dx++) {
+            const xx = dx < 0 ? Math.max(0, x + dx) : Math.min(w - 1, x + dx);
+            sum += src[(yy * w + xx) * 4 + c];
+          }
+        }
+        out[p + c] = sum / 9;
+      }
+    }
+  }
+  return out;
+}
+
+// 언샤프 마스크: 원본 + amount x (원본 - 블러) → 경계 대비 강화
+function unsharp(img, amount) {
+  const { data, width: w, height: h } = img;
+  const blurred = blur3x3RGB(data, w, h);
+  for (let p = 0; p < data.length; p += 4) {
+    for (let c = 0; c < 3; c++) {
+      data[p + c] = clamp255(data[p + c] + amount * (data[p + c] - blurred[p + c]));
+    }
+  }
+}
+
+function buildEnhanced() {
+  const img = new ImageData(new Uint8ClampedArray(state.rawData.data), state.rawData.width, state.rawData.height);
+  if (state.median) medianFilter(img);
+  if (state.sharpen > 0) unsharp(img, state.sharpen / 50); // 0~2.0
+  return img;
+}
+
+// 화질 설정 변경 시: 작업 원본 재구성 → 원본 캔버스 갱신 → 엔진 재처리 (브러시 보정은 유지됨)
+function applyEnhance() {
+  if (!state.rawData) return;
+  state.srcData = buildEnhanced();
+  srcCtx.putImageData(state.srcData, 0, 0);
+  state.distMap = null;
+  process();
+}
+
+let enhancePending = null;
+function scheduleEnhance() {
+  clearTimeout(enhancePending);
+  enhancePending = setTimeout(applyEnhance, 150);
+}
+
+els.denoise.addEventListener('click', () => {
+  state.median = !state.median;
+  els.denoise.classList.toggle('active', state.median);
+  scheduleEnhance();
+});
+
+els.sharpen.addEventListener('input', () => {
+  state.sharpen = Number(els.sharpen.value);
+  els.sharpenVal.value = els.sharpen.value;
+  scheduleEnhance();
 });
 
 /* ---------- 수동 보정 브러시 ----------
@@ -643,23 +749,38 @@ function contentBBox(imageData) {
 }
 
 function buildExportCanvas() {
-  if (!els.trim.checked) return els.outCanvas;
-  const w = els.outCanvas.width, h = els.outCanvas.height;
-  const img = outCtx.getImageData(0, 0, w, h);
-  const box = contentBBox(img);
-  if (!box || (box.w === w && box.h === h)) return els.outCanvas;
-  const c = document.createElement('canvas');
-  c.width = box.w; c.height = box.h;
-  c.getContext('2d').putImageData(img, -box.x, -box.y);
-  return c;
+  let base = els.outCanvas;
+  if (els.trim.checked) {
+    const w = els.outCanvas.width, h = els.outCanvas.height;
+    const img = outCtx.getImageData(0, 0, w, h);
+    const box = contentBBox(img);
+    if (box && (box.w !== w || box.h !== h)) {
+      const c = document.createElement('canvas');
+      c.width = box.w; c.height = box.h;
+      c.getContext('2d').putImageData(img, -box.x, -box.y);
+      base = c;
+    }
+  }
+  const scale = Number(els.exportScale.value) || 1;
+  if (scale > 1) {
+    const up = document.createElement('canvas');
+    up.width = base.width * scale; up.height = base.height * scale;
+    const g = up.getContext('2d');
+    g.imageSmoothingEnabled = true;
+    g.imageSmoothingQuality = 'high';
+    g.drawImage(base, 0, 0, up.width, up.height);
+    return up;
+  }
+  return base;
 }
 
 els.download.addEventListener('click', () => {
-  track('download', { mode: state.mode, trim: els.trim.checked ? 'on' : 'off' });
+  const scale = Number(els.exportScale.value) || 1;
+  track('download', { mode: state.mode, trim: els.trim.checked ? 'on' : 'off', scale });
   buildExportCanvas().toBlob((blob) => {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `${state.fileName}_transparent.png`;
+    a.download = `${state.fileName}_transparent${scale > 1 ? '@' + scale + 'x' : ''}.png`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   }, 'image/png');
