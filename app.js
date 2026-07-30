@@ -19,7 +19,8 @@ const els = {
   sliderRows: document.querySelectorAll('.slider-row'),
   tol: $('#tol'), tolVal: $('#tol-val'),
   soft: $('#soft'), softVal: $('#soft-val'),
-  feather: $('#feather'), featherVal: $('#feather-val'),
+  smooth: $('#smooth'), smoothVal: $('#smooth-val'),
+  despeck: $('#despeck'),
   strength: $('#strength'), strengthVal: $('#strength-val'),
   despeckle: $('#despeckle'), despeckleVal: $('#despeckle-val'),
   swatch: $('#bg-swatch'),
@@ -44,7 +45,7 @@ const state = {
   mode: 'edge',
   tol: 25,
   soft: 25,
-  feather: 0,
+  smooth: 2,
   strength: 110,
   despeckle: 8,
   bg: { r: 255, g: 255, b: 255 },
@@ -189,6 +190,79 @@ function blurAlpha(data, w, h, r) {
 
 function clamp255(v) { return v < 0 ? 0 : v > 255 ? 255 : Math.round(v); }
 
+/* ---------- 외곽선 다듬기: 알파 블러 후 S-커브 재경화 ----------
+ * 계단(재기) 자국을 둥글리고 얇은 안티앨리어싱 경계만 남긴다.
+ * 원래 완전 투명이던 픽셀은 살리지 않아 배경색 번짐(halo)을 막는다. */
+
+function smoothAlpha(data, w, h, strength) {
+  const n = w * h;
+  const orig = new Uint8Array(n);
+  for (let i = 0; i < n; i++) orig[i] = data[i * 4 + 3];
+  const r = strength <= 2 ? 1 : strength <= 4 ? 2 : 3;
+  blurAlpha(data, w, h, r);
+  const w2 = 0.3; // S-커브 폭: 작을수록 경계가 얇고 또렷
+  for (let i = 0; i < n; i++) {
+    const p = i * 4 + 3;
+    if (orig[i] === 0) { data[p] = 0; continue; }
+    let t = data[p] / 255;
+    t = (t - (0.5 - w2)) / (2 * w2);
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    t = t * t * (3 - 2 * t);
+    data[p] = Math.round(t * 255);
+  }
+}
+
+/* ---------- 부스러기 제거: 작은 불투명 픽셀 섬 청소 ---------- */
+
+function removeSpecks(data, w, h) {
+  const n = w * h;
+  const minArea = Math.max(12, Math.min(600, Math.round(n * 0.00005)));
+  const seen = new Uint8Array(n);
+  const stack = new Int32Array(n);
+  const comp = new Int32Array(n);
+  for (let i = 0; i < n; i++) {
+    if (seen[i] || data[i * 4 + 3] < 16) continue;
+    let sp = 0, cnt = 0;
+    seen[i] = 1; stack[sp++] = i;
+    while (sp > 0) {
+      const q = stack[--sp];
+      comp[cnt++] = q;
+      const x = q % w;
+      if (x > 0)     { const j = q - 1; if (!seen[j] && data[j * 4 + 3] >= 16) { seen[j] = 1; stack[sp++] = j; } }
+      if (x < w - 1) { const j = q + 1; if (!seen[j] && data[j * 4 + 3] >= 16) { seen[j] = 1; stack[sp++] = j; } }
+      if (q >= w)    { const j = q - w; if (!seen[j] && data[j * 4 + 3] >= 16) { seen[j] = 1; stack[sp++] = j; } }
+      if (q < n - w) { const j = q + w; if (!seen[j] && data[j * 4 + 3] >= 16) { seen[j] = 1; stack[sp++] = j; } }
+    }
+    if (cnt < minArea) {
+      for (let k = 0; k < cnt; k++) data[comp[k] * 4 + 3] = 0;
+    }
+  }
+}
+
+/* ---------- 허용 오차 자동 설정: 테두리 노이즈 수준 통계 ---------- */
+
+function autoTolerance(data, w, h, bg) {
+  const ds = [];
+  const add = (p) => {
+    const dr = data[p] - bg.r, dg = data[p + 1] - bg.g, db = data[p + 2] - bg.b;
+    const rm = (data[p] + bg.r) / 2;
+    ds.push(Math.sqrt(((2 + rm / 256) * dr * dr + 4 * dg * dg + (2 + (255 - rm) / 256) * db * db) / 9));
+  };
+  for (let x = 0; x < w; x++) { add(x * 4); add(((h - 1) * w + x) * 4); }
+  for (let y = 1; y < h - 1; y++) { add(y * w * 4); add((y * w + w - 1) * 4); }
+  ds.sort((a, b) => a - b);
+  // 상위 15%(피사체가 테두리에 걸친 경우)는 무시하고 노이즈 폭 측정
+  const p85 = ds[Math.floor(ds.length * 0.85)];
+  return Math.max(12, Math.min(55, Math.round(p85 * 1.4 + 4)));
+}
+
+function applyAutoTolerance() {
+  if (!state.srcData) return;
+  state.tol = autoTolerance(state.srcData.data, state.srcData.width, state.srcData.height, state.bg);
+  els.tol.value = state.tol;
+  els.tolVal.value = String(state.tol);
+}
+
 /* ---------- 처리 파이프라인 ---------- */
 
 function process() {
@@ -204,7 +278,8 @@ function process() {
     const threshold = Math.max(state.tol + state.soft, 1);
     const mask = state.mode === 'edge' ? floodMask(state.distMap, w, h, threshold) : null;
     applyKey(out.data, state.distMap, mask, state.tol, state.soft, state.bg);
-    if (state.feather > 0) blurAlpha(out.data, w, h, state.feather);
+    if (state.smooth > 0) smoothAlpha(out.data, w, h, state.smooth);
+    if (els.despeck.checked) removeSpecks(out.data, w, h);
   }
 
   state.engineOut = out;
@@ -250,6 +325,7 @@ function loadFromSrc(src, name) {
     state.strokes = [];
     state.redoStrokes = [];
     state.bg = detectBg(state.srcData.data, w, h);
+    applyAutoTolerance();
     updateSwatch();
     updateBrushUI();
     updateBrushCursor();
@@ -307,7 +383,8 @@ function bindSlider(input, output, key) {
 }
 bindSlider(els.tol, els.tolVal, 'tol');
 bindSlider(els.soft, els.softVal, 'soft');
-bindSlider(els.feather, els.featherVal, 'feather');
+bindSlider(els.smooth, els.smoothVal, 'smooth');
+els.despeck.addEventListener('change', scheduleProcess);
 bindSlider(els.strength, els.strengthVal, 'strength');
 bindSlider(els.despeckle, els.despeckleVal, 'despeckle');
 
@@ -619,6 +696,7 @@ window.addEventListener('resize', () => { applyView(); updateBrushCursor(); });
 els.autoBg.addEventListener('click', () => {
   if (!state.srcData) return;
   state.bg = detectBg(state.srcData.data, state.srcData.width, state.srcData.height);
+  applyAutoTolerance();
   state.distMap = null;
   updateSwatch();
   scheduleProcess();

@@ -21,7 +21,7 @@ if (location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
 </script>
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
 <link rel="apple-touch-icon" href="assets/favicon-180.png">
-<link rel="stylesheet" href="style.css?v=11">
+<link rel="stylesheet" href="style.css?v=12">
 </head>
 <body>
 
@@ -98,10 +98,14 @@ if (location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
           <input type="range" id="soft" min="0" max="80" value="25">
           <output id="soft-val">25</output>
         </label>
-        <label class="slider-row" data-modes="edge global">
-          <span>가장자리 흐림</span>
-          <input type="range" id="feather" min="0" max="4" value="0">
-          <output id="feather-val">0</output>
+        <label class="slider-row" data-modes="edge global" title="계단처럼 거친 외곽선을 매끄러운 안티앨리어싱 경계로 다듬습니다">
+          <span>외곽선 다듬기</span>
+          <input type="range" id="smooth" min="0" max="5" value="2">
+          <output id="smooth-val">2</output>
+        </label>
+        <label class="slider-row" data-modes="edge global" title="배경 제거 후 남은 자잘한 점·얼룩을 자동으로 청소합니다">
+          <span>부스러기 제거</span>
+          <input type="checkbox" id="despeck" checked>
         </label>
         <label class="slider-row" data-modes="stamp">
           <span>진하기</span>
@@ -171,6 +175,6 @@ if (location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
   <p class="footer-meta">배경 지우개 · 100% 브라우저 처리(자체 엔진) · PNG/JPG/WebP 지원 · 방문 통계 수집에 Google Analytics를 사용합니다</p>
 </footer>
 
-<script src="app.js?v=14"></script>
+<script src="app.js?v=15"></script>
 </body>
 </html>
